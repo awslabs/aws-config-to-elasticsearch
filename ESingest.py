@@ -1,31 +1,33 @@
+#!/usr/bin/env python
 __author__ = 'Vladimir Budilov'
 
 import gzip
 import json
 import logging
 import sys
+import time
 from argparse import ArgumentParser
 
 import boto3
+from botocore.client import Config
 
 import elastic
+
+# filename='output.log',
+
 
 kibanaStatus = "http://52.91.87.172:5601/status"
 esStatus = "http://52.91.87.172:9200/"
 
-es = elastic.ElasticSearch(connections="52.91.87.172:9200")
+es = elastic.ElasticSearch(connections="http://52.91.87.172:9200")
 
-s3Conn = None
-s3Client = None
-configConn = None
+downloadedSnapshotFileName = "/tmp/configsnapshot" + str(time.time()) + ".json.gz"
 
-downloadedSnapshotFileName = "/tmp/mysnapshot.json.gz"
-
-regions = ['us-east-1', 'us-west-1', 'us-west-2', 'eu-west-1', 'eu-central-1', 'ap-southeast-1', 'ap-northeast-1',
+regions = ['us-west-1', 'us-west-2', 'eu-west-1', 'us-east-1', 'eu-central-1', 'ap-southeast-1', 'ap-northeast-1',
            'ap-southeast-2', 'ap-northeast-2', 'sa-east-1']
 
 
-def getBucketName():
+def getBucketName(configConn):
     deliveryChannels = configConn.describe_delivery_channels()
     bucketName = None
     try:
@@ -35,51 +37,52 @@ def getBucketName():
             "s3BucketName") is not None:
             bucketName = deliveryChannels.get("DeliveryChannels")[0].get("s3BucketName")
     except:
-        logging.error("Couldn't retrieve the bucket name: " + str(sys.exc_info()))
+        appLog.error("Couldn't retrieve the bucket name: " + str(sys.exc_info()))
 
     return bucketName
 
 
-def deliverSnapshot():
+def deliverSnapshot(configConn):
     snapshotId = None
 
     # Check if the delivery channel is setup
     try:
         deliveryChannelsStatus = configConn.describe_delivery_channel_status()
-        logging.debug("describe_delivery_channel_status result: " + str(deliveryChannelsStatus))
+        verboseLog.info("describe_delivery_channel_status result: " + str(deliveryChannelsStatus))
     except:
-        logging.error("This region is probably not setup properly for the configservice")
-        return None
+        appLog.error("This region is not setup properly for the configservice: " + str(sys.exc_info()))
+        pass
 
     #
     if deliveryChannelsStatus is not None and deliveryChannelsStatus.get("DeliveryChannelsStatus") is not None and len(
             deliveryChannelsStatus.get("DeliveryChannelsStatus")) > 0:
         try:
-            logging.debug("getting the snapshot")
+            verboseLog.debug("getting the snapshot")
             snapshotResult = configConn.deliver_config_snapshot(deliveryChannelName='default')
-            logging.debug("snapshotResult: " + str(snapshotResult))
+            verboseLog.debug("snapshotResult: " + str(snapshotResult))
 
             snapshotId = str(snapshotResult.get("configSnapshotId"))
-            logging.debug("snapshotId: " + str(snapshotId))
+            verboseLog.debug("snapshotId: " + str(snapshotId))
         except:
-            logging.error("Couldn't get the new snapshot: " + str(sys.exc_info()))
+            appLog.error("Couldn't deliver new snapshot: " + str(sys.exc_info()))
             return None
 
     return snapshotId
 
 
-def getConfigurationSnapshotFile(bucket, filePartialName):
+def getConfigurationSnapshotFile(s3Conn, bucketName, filePartialName):
     '''
     Loop through the files and find the current snapshot. Since s3 doesn't support regex lookups, I need to
     iterate over all of the items (and the config snapshot's name is not fully predictable because of the date value
     '''
     resultFile = None
-    bucket = s3Conn.Bucket(str(bucket))
+    bucket = s3Conn.Bucket(str(bucketName))
 
     for key in bucket.objects.all():
+        # logging.info("found: " + key.key)
         if filePartialName in key.key:
             resultFile = key.key
-            print(key.key)
+            verboseLog.info("Found the file in S3: " + resultFile)
 
     return resultFile
 
@@ -91,39 +94,127 @@ def loadDataIntoES(filename):
     if data is not None and data.get("configurationItems") is not None and len(data.get("configurationItems")) > 0:
         for item in data.get("configurationItems"):
             try:
-                es.add(item.get("resourceType").lower(), item.get("awsRegion"), item.get("resourceId"), item)
+                indexName = item.get("resourceType").lower()
+                typeName = item.get("awsRegion")
+
+                verboseLog.info("storing in ES: " + str(item))
+                if addedIndexAndTypeDict.get(indexName) is not None and typeName not in addedIndexAndTypeDict.get(indexName):
+                    pass
+                else:
+                    verboseLog.info("Setting the " + indexName + " index and " + typeName + " type to not_analyze")
+                    es.setNotAnalyzed(indexName, typeName)
+
+                    if addedIndexAndTypeDict.get(indexName) is None:
+                        addedIndexAndTypeDict[indexName] = []
+                    else:
+                        addedIndexAndTypeDict[indexName].append(typeName)
+
+                es.add(indexName, typeName, item.get("resourceId"), item)
             except:
-                logging.error("Couldn't add item: " + str(item) + " because " + str(sys.exc_info()))
+                appLog.error("Couldn't add item: " + str(item) + " because " + str(sys.exc_info()))
                 pass
 
 
-def main():
-    s3Conn = boto3.resource('s3')
-    s3Client = boto3.client('s3')
-    configConn = boto3.client('config')
+def setNotAnalyzedOnESIndex(indexName):
+    '''
+    PUT /my_index
+    {
+      "mappings": {
+        "my_type": {
+            "dynamic_templates": [
+                { "notanalyzed": {
+                      "match":              "*",
+                      "match_mapping_type": "string",
+                      "mapping": {
+                          "type":        "string",
+                          "index":       "not_analyzed"
+                      }
+                   }
+                }
+              ]
+           }
+       }
+    }
+        '''
 
-    # snapshotId = deliverSnapshot()
-    bucketName = getBucketName()
-    snapshotId = "6d6807b5-e45e-43d1-a54e-46db834f8bac"
-    snapshotFilePath = getConfigurationSnapshotFile(bucketName, snapshotId)
-    # snapshotFile = s3Client.get_object(bucketName, snapshotFilePath)
-    s3Client.download_file(bucketName, snapshotFilePath, downloadedSnapshotFileName)
-    loadDataIntoES(downloadedSnapshotFileName)
+
+def main(region):
+    myRegions = []
+    if (region is not None):
+        myRegions.append(region)
+    else:
+        myRegions = regions
+
+    verboseLog.info("Looping through the regions")
+    for curRegion in myRegions:
+        appLog.info("Current region: " + curRegion)
+
+        s3Conn = boto3.resource('s3', region_name=curRegion, config=Config(signature_version='s3v4'))
+        s3Client = boto3.client('s3', region_name=curRegion, config=Config(signature_version='s3v4'))
+        configConn = boto3.client('config', region_name=curRegion)
+
+        verboseLog.info("Creating snapshot")
+        snapshotId = deliverSnapshot(configConn)
+        verboseLog.info("Got a new snapshot with an id of " + str(snapshotId))
+        if snapshotId is None:
+            continue
+
+        bucketName = getBucketName(configConn)
+        verboseLog.info("Using the following bucket name to search for the snapshot: " + str(bucketName))
+        if bucketName is None:
+            continue
+
+        snapshotFilePath = getConfigurationSnapshotFile(s3Conn, bucketName, snapshotId)
+        counter = 0
+        if snapshotFilePath is None:
+            while counter < 4:
+                appLog.info("Waiting for the snapshot to appear")
+                time.sleep(5)
+                counter = counter + 1
+                snapshotFilePath = getConfigurationSnapshotFile(s3Conn, bucketName, snapshotId)
+                if snapshotFilePath is not None:
+                    break
+
+        verboseLog.info("snapshotFile: " + str(snapshotFilePath))
+        if snapshotFilePath is None:
+            continue
+
+        verboseLog.info("Downloading the file to " + str(downloadedSnapshotFileName))
+        s3Client.download_file(bucketName, snapshotFilePath, downloadedSnapshotFileName)
+
+        verboseLog.info("Loading the file into elasticsearch")
+        loadDataIntoES(downloadedSnapshotFileName)
+
+        appLog.info("Successfully loaded data from " + curRegion)
 
 
 if __name__ == "__main__":
     parser = ArgumentParser()
 
-    parser.add_argument('--file', '-f',
-                        help='The configuration snapshot file that needs to be ingested')
+    parser.add_argument('--region', '-r',
+                        help='The region that needs to be analyzed. If left blank all regions will be analyzed.')
 
-    parser.add_argument('--enable', '-e',
-                        help='The configuration snapshot file that needs to be ingested')
-
+    parser.add_argument('--verbose', '-v', action='store_true', default=False,
+                        help='If selected, the app spits out a lot of additional debug logs')
     args = parser.parse_args()
 
-    # filename='output.log',
-    logging.basicConfig(filename='output.log', level=logging.DEBUG,
-                        format='%(asctime)s - %(name)s -  %(levelname)s - %(message)s')
+    addedIndexAndTypeDict = {}
 
-    main()
+    # Mute all other loggers
+    logging.getLogger("root").setLevel(level=logging.FATAL)
+    logging.getLogger("botocore.credentials").setLevel(level=logging.FATAL)
+    logging.getLogger("botocore.vendored.requests.packages.urllib3.connectionpool").setLevel(level=logging.FATAL)
+    logging.getLogger("boto3").setLevel(level=logging.FATAL)
+
+    # Setup the main app logger
+    appLog = logging.getLogger("app")
+    appLog.setLevel(level=logging.INFO)
+
+    # Setup the verbose logger
+    verboseLog = logging.getLogger("verbose")
+    if args.verbose:
+        verboseLog.setLevel(level=logging.INFO)
+    else:
+        verboseLog.setLevel(level=logging.FATAL)
+
+    main(args.region)
