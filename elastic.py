@@ -3,10 +3,8 @@ __author__ = 'Vladimir Budilov'
 import datetime
 import json
 import logging
-import sys
-
-import elasticsearch
 import requests
+import sys
 
 
 class ElasticSearch():
@@ -19,10 +17,6 @@ class ElasticSearch():
             self.connections = connections
 
         logging.info("Setting up the initial connection")
-
-        self.es = elasticsearch.Elasticsearch(self.connections, sniff_on_start=sniffOnStart,
-                                              sniff_on_connection_fail=False,
-                                              sniffer_timeout=60)
 
     def add(self, indexName, docType, indexId, jsonMessage):
         """ Returns the id of the newly inserted value or None """
@@ -67,19 +61,11 @@ class ElasticSearch():
         jsonMessage = json.dumps(jsonMessageDict)
 
         if indexId:
-            response = self.es.index(
-                index=indexName,
-                doc_type=docType,
-                id=indexId,
-                body=jsonMessage
-            )
+            response = requests.put(self.connections + "/" + indexName + "/" + docType + "/" + indexId,
+                                    data=jsonMessage)
         else:
-            response = self.es.index(
-                index=indexName,
-                doc_type=docType,
-                body=jsonMessage
-            )
-        logging.info("response: " + str(response))
+            response = requests.put(self.connections + "/" + indexName + "/" + docType, data=jsonMessage)
+        # logging.info("response: " + str(response))
 
         responseId = None
         try:
@@ -89,39 +75,33 @@ class ElasticSearch():
 
         return responseId
 
-    def setNotAnalyzed(self, indexName, typeName):
+    def setNotAnalyzedTemplate(self):
         '''
         Sets the indexName and typeName as not_analyzed, which means that the data
         won't be tokenized, and therefore can be searched by the value itself
         '''
 
-
         payload = {
+            "template": "*",
+            "settings": {
+                "index.refresh_interval": "5s"
+            },
             "mappings": {
-                typeName: {
-                    "dynamic_templates": [
-                        {
-                            "strings": {
-                                "match_mapping_type": "string",
-                                "mapping": {
-                                    "type": "string",
-                                    "fields": {
-                                        "raw": {
-                                            "type":  "string",
-                                            "index": "not_analyzed",
-                                            "ignore_above": 256
-                                        }
-                                    }
+                "_default_": {
+                    "_all": {"enabled": True},
+                    "dynamic_templates": [{
+                        "string_fields": {
+                            "match": "*",
+                            "match_mapping_type": "string",
+                            "mapping": {
+                                "type": "string", "index": "analyzed", "omit_norms": True,
+                                "fields": {
+                                    "raw": {"type": "string", "index": "not_analyzed", "ignore_above": 256}
                                 }
                             }
                         }
-                    ]
+                    }]
                 }
             }
         }
-        print("Sending request")
-        result = requests.put(self.connections + "/" + indexName, payload)
-        print result.text
-if __name__ == "__main__":
-    es = ElasticSearch(connections="http://52.91.87.172:9200")
-    es.setNotAnalyzed("aws::ec2::aainternetgateway", "us-west-2")
+        requests.put(self.connections + "/_template/configservice", data=json.dumps(payload))
