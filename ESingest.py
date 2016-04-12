@@ -104,7 +104,7 @@ def main(region):
         snapshotFilePath = getConfigurationSnapshotFile(s3Conn, bucketName, snapshotId)
         counter = 0
         if snapshotFilePath is None:
-            while counter < 5:
+            while counter < 10:
                 appLog.info(" " + str(counter) + " - Waiting for the snapshot to appear")
                 time.sleep(10)
                 counter = counter + 1
@@ -146,7 +146,7 @@ if __name__ == "__main__":
     logging.getLogger("requests").setLevel(level=logging.FATAL)
 
     # Setup the main app logger
-    appLog = logging.getLogger("app")
+    appLog = logging.getLogger("__main__: ")
     appLog.setLevel(level=logging.INFO)
 
     if args.destination is None:
