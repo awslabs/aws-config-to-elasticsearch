@@ -49,7 +49,7 @@ class ConfigServiceUtil():
         #
         if deliveryChannelsStatus is not None and deliveryChannelsStatus.get(
                 "DeliveryChannelsStatus") is not None and len(
-                deliveryChannelsStatus.get("DeliveryChannelsStatus")) > 0:
+            deliveryChannelsStatus.get("DeliveryChannelsStatus")) > 0:
             try:
                 self.verboseLog.debug("getting the snapshot")
                 snapshotResult = self.configConn.deliver_config_snapshot(deliveryChannelName='default')
@@ -58,7 +58,6 @@ class ConfigServiceUtil():
                 snapshotId = str(snapshotResult.get("configSnapshotId"))
                 self.verboseLog.debug("snapshotId: " + str(snapshotId))
             except:
-                self.appLog.error("Couldn't deliver new snapshot: " + str(sys.exc_info()))
-                return None
+                self.appLog.error("Couldn't deliver new snapshot. Maybe you're being throttled. " + str(sys.exc_info()))
 
         return snapshotId

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 __author__ = 'Vladimir Budilov'
 
+import datetime
 import gzip
 import json
 import logging
@@ -14,14 +15,12 @@ from botocore.client import Config
 import elastic
 from configServiceUtil import ConfigServiceUtil
 
-kibanaStatus = "http://52.91.87.172:5601/status"
-esStatus = "http://52.91.87.172:9200/"
-
 downloadedSnapshotFileName = "/tmp/configsnapshot" + str(time.time()) + ".json.gz"
 
 regions = ['us-west-1', 'us-west-2', 'eu-west-1', 'us-east-1', 'eu-central-1', 'ap-southeast-1', 'ap-northeast-1',
            'ap-southeast-2', 'ap-northeast-2', 'sa-east-1']
 
+isoNowTime = datetime.datetime.now().isoformat()
 
 def getConfigurationSnapshotFile(s3Conn, bucketName, filePartialName):
     '''
@@ -46,31 +45,28 @@ def loadDataIntoES(filename):
     with gzip.open(filename, 'rb') as dataFile:
         data = json.load(dataFile)
 
+    itemCount = 0
+
     if data is not None and data.get("configurationItems") is not None and len(data.get("configurationItems")) > 0:
         for item in data.get("configurationItems"):
             try:
                 indexName = item.get("resourceType").lower()
-                typeName = item.get("awsRegion")
+                typeName = item.get("awsRegion").lower()
 
-                verboseLog.info("storing in ES: " + str(item))
-                if addedIndexAndTypeDict.get(indexName) is not None and typeName not in addedIndexAndTypeDict.get(
-                        indexName):
-                    pass
-                else:
-                    verboseLog.info("Setting the " + indexName + " index and " + typeName + " type to not_analyze")
-
-                    if addedIndexAndTypeDict.get(indexName) is None:
-                        addedIndexAndTypeDict[indexName] = []
-                    else:
-                        addedIndexAndTypeDict[indexName].append(typeName)
-
-                es.add(indexName, typeName, item.get("resourceId"), item)
+                verboseLog.info("storing in ES: " + str(item.get("resourceType")))
+                item['snapshotTimeIso'] = isoNowTime
+                es.add(indexName=indexName, docType=typeName, jsonMessage=item)
+                itemCount = itemCount + 1
             except:
                 appLog.error("Couldn't add item: " + str(item) + " because " + str(sys.exc_info()))
                 pass
 
+    return itemCount
 
-def main(region):
+
+def main(args):
+    region = args.region
+
     # This call is light, so it's ok not to check whether the template already exists
     es.setNotAnalyzedTemplate()
 
@@ -88,31 +84,32 @@ def main(region):
         s3Client = boto3.client('s3', region_name=curRegion, config=Config(signature_version='s3v4'))
         configService = ConfigServiceUtil(region=curRegion, log=appLog)
 
+        bucketName = configService.getBucketNameFromConfigDeliveryChannel()
+        if bucketName is None:
+            appLog.error(
+                "The S3 bucket couldn't be found -- most likely you don't have AWS Config setup in this region")
+            continue
+        verboseLog.info("Using the following bucket name to search for the snapshot: " + str(bucketName))
+
         verboseLog.info("Creating snapshot")
         snapshotId = configService.deliverSnapshot()
         verboseLog.info("Got a new snapshot with an id of " + str(snapshotId))
         if snapshotId is None:
-            appLog.info("AWS Config isn't setup in " + curRegion)
-            continue
-
-        bucketName = configService.getBucketNameFromConfigDeliveryChannel()
-        verboseLog.info("Using the following bucket name to search for the snapshot: " + str(bucketName))
-        if bucketName is None:
-            appLog.error("Couldn't search an S3 bucket -- are you sure your permissions are setup correctly?")
+            appLog.info("AWS Config isn't setup or your requests are being throttled")
             continue
 
         snapshotFilePath = getConfigurationSnapshotFile(s3Conn, bucketName, snapshotId)
-        counter = 0
+        counter = 1
         if snapshotFilePath is None:
-            while counter < 10:
+            while counter < 20:
                 appLog.info(" " + str(counter) + " - Waiting for the snapshot to appear")
-                time.sleep(10)
+                time.sleep(5)
                 counter = counter + 1
                 snapshotFilePath = getConfigurationSnapshotFile(s3Conn, bucketName, snapshotId)
                 if snapshotFilePath is not None:
                     break
 
-        verboseLog.info("snapshotFile: " + str(snapshotFilePath))
+        appLog.info("Snapshot File Name: " + str(snapshotFilePath))
         if snapshotFilePath is None:
             continue
 
@@ -120,14 +117,13 @@ def main(region):
         s3Client.download_file(bucketName, snapshotFilePath, downloadedSnapshotFileName)
 
         verboseLog.info("Loading the file into elasticsearch")
-        loadDataIntoES(downloadedSnapshotFileName)
+        itemCount = loadDataIntoES(downloadedSnapshotFileName)
 
-        appLog.info("Successfully loaded data from " + curRegion)
+        appLog.info("Successfully loaded " + str(itemCount) + " items into ElasticSearch from " + curRegion)
 
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-
     parser.add_argument('--region', '-r',
                         help='The region that needs to be analyzed. If left blank all regions will be analyzed.')
     parser.add_argument('--destination', '-d', required=True,
@@ -136,7 +132,20 @@ if __name__ == "__main__":
                         help='If selected, the app runs in verbose mode -- a lot more logs!')
     args = parser.parse_args()
 
-    addedIndexAndTypeDict = {}
+    logging.basicConfig()
+
+    # Setup the main app logger
+    appLog = logging.getLogger("__main__")
+    appLog.setLevel(level=logging.INFO)
+
+    appLog.info("Adding the data to a new index: " + str(isoNowTime))
+
+    # Setup the verbose logger
+    verboseLog = logging.getLogger("__verbose__")
+    if args.verbose:
+        verboseLog.setLevel(level=logging.INFO)
+    else:
+        verboseLog.setLevel(level=logging.FATAL)
 
     # Mute all other loggers
     logging.getLogger("root").setLevel(level=logging.FATAL)
@@ -145,23 +154,13 @@ if __name__ == "__main__":
     logging.getLogger("boto3").setLevel(level=logging.FATAL)
     logging.getLogger("requests").setLevel(level=logging.FATAL)
 
-    # Setup the main app logger
-    appLog = logging.getLogger("__main__: ")
-    appLog.setLevel(level=logging.INFO)
-
     if args.destination is None:
         appLog.error("You need to enter the IP of your ElasticSearch instance")
         exit()
     else:
         destination = "http://" + args.destination
 
-    es = elastic.ElasticSearch(connections=destination)
+    verboseLog.info("Setting up the elasticsearch instance")
+    es = elastic.ElasticSearch(connections=destination, log=verboseLog)
 
-    # Setup the verbose logger
-    verboseLog = logging.getLogger("verbose")
-    if args.verbose:
-        verboseLog.setLevel(level=logging.INFO)
-    else:
-        verboseLog.setLevel(level=logging.FATAL)
-
-    main(args.region)
+    main(args)
