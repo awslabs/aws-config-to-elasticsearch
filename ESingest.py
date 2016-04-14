@@ -132,16 +132,16 @@ if __name__ == "__main__":
                         help='If selected, the app runs in verbose mode -- a lot more logs!')
     args = parser.parse_args()
 
-    logging.basicConfig()
+    logging.basicConfig(format=' %(name)-12s:  %(message)s')
 
     # Setup the main app logger
-    appLog = logging.getLogger("__main__")
+    appLog = logging.getLogger("app")
     appLog.setLevel(level=logging.INFO)
 
-    appLog.info("Adding the data to a new index: " + str(isoNowTime))
+    appLog.info("Snapshot Time: " + str(isoNowTime))
 
     # Setup the verbose logger
-    verboseLog = logging.getLogger("__verbose__")
+    verboseLog = logging.getLogger("verbose")
     if args.verbose:
         verboseLog.setLevel(level=logging.INFO)
     else:
