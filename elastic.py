@@ -35,16 +35,19 @@ class ElasticSearch():
 
         jsonMessage = json.dumps(jsonMessageDict)
 
+        self.log.info("adding item into ES: " + str(jsonMessageDict))
         if indexId:
             response = requests.put(self.connections + "/" + indexName + "/" + docType + "/" + indexId,
                                     data=jsonMessage)
         else:
             response = requests.post(self.connections + "/" + indexName + "/" + docType, data=jsonMessage)
-        self.log.info("response: " + str(response) + "...message: " + str(response.content))
+
+        self.log.info("response: " + str(response.content) + "...message: " + str(response.content))
 
         responseId = None
+
         try:
-            responseId = response["_id"]
+            responseId = json.loads(response.content).get("_id")
         except:
             pass
 

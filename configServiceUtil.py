@@ -7,20 +7,16 @@ import boto3
 
 
 class ConfigServiceUtil():
-    def __init__(self, region, log=None, verbose=False):
+    def __init__(self, region, verboseLog=None):
         self.region = region
 
         self.configConn = boto3.client('config', region_name=region)
-        self.verboseLog = logging.getLogger("verbose")
-        if verbose:
-            self.verboseLog.setLevel(level=logging.INFO)
-        else:
-            self.verboseLog.setLevel(level=logging.FATAL)
 
-        if log is None:
-            self.appLog = self.verboseLog
+        if verboseLog is None:
+            self.verboseLog = logging.getLogger("configService")
+            self.verboseLog.setLevel(level=logging.FATAL)
         else:
-            self.appLog = log
+            self.verboseLog = verboseLog
 
     def getBucketNameFromConfigDeliveryChannel(self):
         deliveryChannels = self.configConn.describe_delivery_channels()
@@ -31,7 +27,7 @@ class ConfigServiceUtil():
                 "s3BucketName") is not None:
                 bucketName = deliveryChannels.get("DeliveryChannels")[0].get("s3BucketName")
         except:
-            self.appLog.error("Couldn't retrieve the bucket name: " + str(sys.exc_info()))
+            self.verboseLog.error("Couldn't retrieve the bucket name: " + str(sys.exc_info()))
 
         return bucketName
 
@@ -43,7 +39,7 @@ class ConfigServiceUtil():
             deliveryChannelsStatus = self.configConn.describe_delivery_channel_status()
             self.verboseLog.info("describe_delivery_channel_status result: " + str(deliveryChannelsStatus))
         except:
-            self.appLog.error("This region is not setup properly for the configservice: " + str(sys.exc_info()))
+            self.verboseLog.error("This region is not setup properly for the configservice: " + str(sys.exc_info()))
             pass
 
         #
@@ -58,6 +54,6 @@ class ConfigServiceUtil():
                 snapshotId = str(snapshotResult.get("configSnapshotId"))
                 self.verboseLog.debug("snapshotId: " + str(snapshotId))
             except:
-                self.appLog.error("Couldn't deliver new snapshot. Maybe you're being throttled. " + str(sys.exc_info()))
+                self.verboseLog.error("Couldn't deliver new snapshot. Maybe you're being throttled. " + str(sys.exc_info()))
 
         return snapshotId

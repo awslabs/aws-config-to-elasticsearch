@@ -46,6 +46,7 @@ def loadDataIntoES(filename):
         data = json.load(dataFile)
 
     itemCount = 0
+    couldNotAddCount = 0
 
     if data is not None and data.get("configurationItems") is not None and len(data.get("configurationItems")) > 0:
         for item in data.get("configurationItems"):
@@ -55,13 +56,16 @@ def loadDataIntoES(filename):
 
                 verboseLog.info("storing in ES: " + str(item.get("resourceType")))
                 item['snapshotTimeIso'] = isoNowTime
-                es.add(indexName=indexName, docType=typeName, jsonMessage=item)
-                itemCount = itemCount + 1
+                response = es.add(indexName=indexName, docType=typeName, jsonMessage=item)
+                if response is not None:
+                    itemCount = itemCount + 1
+                else:
+                    couldNotAddCount = couldNotAddCount + 1
             except:
                 appLog.error("Couldn't add item: " + str(item) + " because " + str(sys.exc_info()))
                 pass
 
-    return itemCount
+    return itemCount, couldNotAddCount
 
 
 def main(args):
@@ -82,7 +86,12 @@ def main(args):
 
         s3Conn = boto3.resource('s3', region_name=curRegion, config=Config(signature_version='s3v4'))
         s3Client = boto3.client('s3', region_name=curRegion, config=Config(signature_version='s3v4'))
-        configService = ConfigServiceUtil(region=curRegion, log=appLog)
+        if args.verbose:
+            configLog = verboseLog
+        else:
+            configLog = None
+
+        configService = ConfigServiceUtil(region=curRegion, verboseLog=configLog)
 
         bucketName = configService.getBucketNameFromConfigDeliveryChannel()
         if bucketName is None:
@@ -109,17 +118,22 @@ def main(args):
                 if snapshotFilePath is not None:
                     break
 
-        appLog.info("Snapshot File Name: " + str(snapshotFilePath))
         if snapshotFilePath is None:
+            appLog.error("Snapshot file is empty -- cannot proceed")
             continue
+        else:
+            appLog.info("Snapshot File Name: " + str(snapshotFilePath))
 
         verboseLog.info("Downloading the file to " + str(downloadedSnapshotFileName))
         s3Client.download_file(bucketName, snapshotFilePath, downloadedSnapshotFileName)
 
         verboseLog.info("Loading the file into elasticsearch")
-        itemCount = loadDataIntoES(downloadedSnapshotFileName)
+        itemCount, couldNotAdd = loadDataIntoES(downloadedSnapshotFileName)
 
-        appLog.info("Successfully loaded " + str(itemCount) + " items into ElasticSearch from " + curRegion)
+        if itemCount > 0:
+            appLog.info("Added: " + str(itemCount) + " items into ElasticSearch from " + curRegion)
+        if couldNotAdd > 0:
+            appLog.warn("Couldn't add " + str(couldNotAdd) + " to ElasticSearch. Maybe you have permission issues? ")
 
 
 if __name__ == "__main__":
