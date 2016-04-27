@@ -1,1 +1,0 @@
-# aws-config-to-elasticsearch
