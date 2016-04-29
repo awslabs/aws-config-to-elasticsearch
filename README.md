@@ -23,14 +23,14 @@ usage: ESingest.py [-h] [--region REGION] --destination DESTINATION
 ESingest.py: error: argument --destination/-d is required
 ```
 
-Let's say that you have your ElasticSearch node running on 8.8.8.8:9200 and you want to import only your us-east-1 snapshot, then you'd run the following command:
+Let's say that you have your ElasticSearch node running on localhost:9200 and you want to import only your us-east-1 snapshot, then you'd run the following command:
 ```bash
-./ESingest.py -v -d 8.8.8.8:9200 -r us-east-1
+./ESingest.py -v -d localhost:9200 -r us-east-1
 ```
 
 If you want to import Snapshots from all of your AWS Config-enabled regions, run the command without the '-r' parameter:
 ```bash
-./ESingest.py -v -d 8.8.8.8:9200
+./ESingest.py -v -d localhost:9200
 ```
 # Cleanup -- DON'T RUN THESE COMMANDS IF YOU DON'T WANT TO LOSE EVERYTHING IN YOUR ELASTICSEARCH NODE!!!!
 __THIS COMMAND WILL ERASE EVERYTHING FROM YOUR ES NODE --- BE CAREFUL BEFORE RUNNING__
