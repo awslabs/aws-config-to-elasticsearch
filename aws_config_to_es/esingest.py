@@ -1,18 +1,5 @@
 #!/usr/bin/env python
 
-"""
-Copyright 2016 Amazon.com, Inc. or its affiliates. All Rights Reserved.
-
-Licensed under the Apache License, Version 2.0 (the "License"). You may not use this file except in compliance with the
-License. A copy of the License is located at
-
-    http://aws.amazon.com/apache2.0/
-
-or in the "license" file accompanying this file. This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions
-and limitations under the License.
-"""
-
 import datetime
 import gzip
 import json
@@ -25,16 +12,15 @@ import boto3
 from botocore.client import Config
 
 import elastic
-from configServiceUtil import ConfigServiceUtil
+from configservice_util import ConfigServiceUtil
 
-downloaded_snapshot_file_name = "/tmp/configsnapshot" + \
+DOWNLOADED_SNAPSHOT_FILE_NAME = "/tmp/configsnapshot" + \
                                 str(time.time()) + ".json.gz"
 
-regions = [
-    'us-west-1', 'us-west-2', 'eu-west-1', 'us-east-1', 'eu-central-1', 'ap-southeast-1', 'ap-northeast-1',
+REGIONS = [
+    'us-west-1', 'us-west-2', 'eu-west-1', 'us-east-1',
+    'eu-central-1', 'ap-southeast-1', 'ap-northeast-1',
     'ap-southeast-2', 'ap-northeast-2', 'sa-east-1']
-
-isoNowTime = datetime.datetime.now().isoformat()
 
 
 def get_configuration_snapshot_file(s3conn, bucket_name, file_partial_name):
@@ -56,63 +42,52 @@ def get_configuration_snapshot_file(s3conn, bucket_name, file_partial_name):
     return result
 
 
-def load_data_into_es(filename):
+def load_data_into_es(filename, iso_now_time, es):
+    data = None
     with gzip.open(filename, 'rb') as dataFile:
-        data = json.load(dataFile)
+        if dataFile is not None:
+            data = json.load(dataFile)
 
     itemcount = 0
     couldnotaddcount = 0
 
-    if data is not None and data.get("configurationItems") is not None and len(data.get("configurationItems")) > 0:
-        for item in data.get("configurationItems"):
-            try:
-                indexname = item.get("resourceType").lower()
-                typename = item.get("awsRegion").lower()
+    if data is not None:
+        configuration_items = data.get("configurationItems")
 
-                verbose_log.info(
-                    "storing in ES: " + str(item.get("resourceType")))
-                item['snapshotTimeIso'] = isoNowTime
-                response = es.add(
-                    index_name=indexname,
-                    doc_type=typename,
-                    json_message=item)
-                if response is not None:
-                    itemcount = itemcount + 1
-                else:
-                    couldnotaddcount = couldnotaddcount + 1
-            except:
-                appLog.error("Couldn't add item: " + str(
-                    item) + " because " + str(sys.exc_info()))
-                pass
+        if configuration_items is not None and len(configuration_items) > 0:
+            for item in configuration_items:
+                try:
+                    indexname = item.get("resourceType").lower()
+                    typename = item.get("awsRegion").lower()
+
+                    verbose_log.info(
+                        "storing in ES: " + str(item.get("resourceType")))
+                    item['snapshotTimeIso'] = iso_now_time
+                    response = es.add(
+                        index_name=indexname,
+                        doc_type=typename,
+                        json_message=item)
+                    if response is not None:
+                        itemcount = itemcount + 1
+                    else:
+                        couldnotaddcount = couldnotaddcount + 1
+                except:
+                    app_log.error("Couldn't add item: " + str(
+                        item) + " because " + str(sys.exc_info()))
+                    pass
 
     return itemcount, couldnotaddcount
 
+def loop_through_regions(my_regions, iso_now_time, es):
 
-def main(args):
-    region = args.region
-
-    # This call is light, so it's ok not to check whether the template already
-    # exists
-    es.set_not_analyzed_template()
-
-    my_regions = []
-    if region is not None:
-        my_regions.append(region)
-    else:
-        my_regions = regions
-
-    verbose_log.info("Looping through the regions")
     for curRegion in my_regions:
-        appLog.info("Current region: " + curRegion)
+        app_log.info("Current region: " + curRegion)
 
         s3conn = boto3.resource(
             's3',
             region_name=curRegion,
             config=Config(signature_version='s3v4'))
-        s3client = boto3.client(
-            's3',
-            region_name=curRegion,
-            config=Config(signature_version='s3v4'))
+
         if args.verbose:
             configlog = verbose_log
         else:
@@ -124,7 +99,7 @@ def main(args):
 
         bucket_name = configService.get_bucket_name_from_config_delivery_channel()
         if bucket_name is None:
-            appLog.error(
+            app_log.error(
                 "The S3 bucket couldn't be found -- most likely you don't have AWS Config setup in this region")
             continue
         verbose_log.info(
@@ -134,48 +109,66 @@ def main(args):
         snapshotid = configService.deliver_snapshot()
         verbose_log.info("Got a new snapshot with an id of " + str(snapshotid))
         if snapshotid is None:
-            appLog.info(
+            app_log.info(
                 "AWS Config isn't setup or your requests are being throttled")
             continue
 
         snapshot_file_path = get_configuration_snapshot_file(
             s3conn, bucket_name, snapshotid)
-        counter = 1
         if snapshot_file_path is None:
-            while counter < 20:
-                appLog.info(
+            for counter in xrange(1, 20):
+                app_log.info(
                     " " + str(counter) + " - Waiting for the snapshot to appear")
                 time.sleep(5)
-                counter = counter + 1
                 snapshot_file_path = get_configuration_snapshot_file(
                     s3conn, bucket_name, snapshotid)
                 if snapshot_file_path is not None:
                     break
 
         if snapshot_file_path is None:
-            appLog.error("Snapshot file is empty -- cannot proceed")
+            app_log.error("Snapshot file is empty -- cannot proceed")
             continue
-        else:
-            appLog.info("Snapshot File Name: " + str(snapshot_file_path))
+
+        app_log.info("Snapshot File Name: " + str(snapshot_file_path))
 
         verbose_log.info(
             "Downloading the file to " + str(
-                downloaded_snapshot_file_name))
-        s3client.download_file(
+                DOWNLOADED_SNAPSHOT_FILE_NAME))
+        s3conn.meta.client.download_file(
             bucket_name,
             snapshot_file_path,
-            downloaded_snapshot_file_name)
+            DOWNLOADED_SNAPSHOT_FILE_NAME)
 
         verbose_log.info("Loading the file into elasticsearch")
-        itemCount, couldNotAdd = load_data_into_es(downloaded_snapshot_file_name)
+        itemCount, couldNotAdd = load_data_into_es(DOWNLOADED_SNAPSHOT_FILE_NAME, iso_now_time, es)
 
         if itemCount > 0:
-            appLog.info("Added: " + str(itemCount) +
-                        " items into ElasticSearch from " + curRegion)
+            app_log.info("Added: " + str(itemCount) +
+                         " items into ElasticSearch from " + curRegion)
         if couldNotAdd > 0:
-            appLog.warn("Couldn't add " + str(couldNotAdd) +
-                        " to ElasticSearch. Maybe you have permission issues? ")
+            app_log.warn("Couldn't add " + str(couldNotAdd) +
+                         " to ElasticSearch. Maybe you have permission issues? ")
 
+
+def main(args, es):
+    iso_now_time = datetime.datetime.now().isoformat()
+    app_log.info("Snapshot Time: " + str(iso_now_time))
+
+    region = args.region
+
+    # This call is light, so it's ok not to check whether the template already
+    # exists
+    es.set_not_analyzed_template()
+
+    my_regions = []
+    if region is not None:
+        my_regions.append(region)
+    else:
+        my_regions = REGIONS
+
+    verbose_log.info("Looping through the regions")
+
+    loop_through_regions(my_regions, iso_now_time, es)
 
 if __name__ == "__main__":
     parser = ArgumentParser()
@@ -190,10 +183,8 @@ if __name__ == "__main__":
     logging.basicConfig(format=' %(name)-12s:  %(message)s')
 
     # Setup the main app logger
-    appLog = logging.getLogger("app")
-    appLog.setLevel(level=logging.INFO)
-
-    appLog.info("Snapshot Time: " + str(isoNowTime))
+    app_log = logging.getLogger("app")
+    app_log.setLevel(level=logging.INFO)
 
     # Setup the verbose logger
     verbose_log = logging.getLogger("verbose")
@@ -213,12 +204,11 @@ if __name__ == "__main__":
 
     destination = None
     if args.destination is None:
-        appLog.error("You need to enter the IP of your ElasticSearch instance")
+        app_log.error("You need to enter the IP of your ElasticSearch instance")
         exit()
-    else:
-        destination = "http://" + args.destination
+
+    destination = "http://" + args.destination
 
     verbose_log.info("Setting up the elasticsearch instance")
-    es = elastic.ElasticSearch(connections=destination, log=verbose_log)
 
-    main(args)
+    main(args, elastic.ElasticSearch(connections=destination, log=verbose_log))

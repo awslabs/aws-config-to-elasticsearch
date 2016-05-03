@@ -11,32 +11,32 @@ git clone --depth 1 <repo_url>
 
 ### The code
 #### Prerequisites
-1. An ELK stack, up and running
-
-2. Install the required packages. The requirements.txt file is included with this repo.
+* Python 2.7
+* An ELK stack, up and running
+* Install the required packages. The requirements.txt file is included with this repo.
 ```
 pip install -r ./requirements.txt
 ```
 
 #### The command
 ```bash
-./ESingest.py
-usage: ESingest.py [-h] [--region REGION] --destination DESTINATION [--verbose]
+./esingest.py
+usage: esingest.py [-h] [--region REGION] --destination DESTINATION [--verbose]
 
 ```
 
 1. Let's say that you have your ElasticSearch node running on localhost:9200 and you want to import only your us-east-1 snapshot, then you'd run the following command:
 ```bash
-./ESingest.py -d localhost:9200 -r us-east-1
+./esingest.py -d localhost:9200 -r us-east-1
 ```
 
 2. If you want to import Snapshots from all of your AWS Config-enabled regions, run the command without the '-r' parameter:
 ```bash
-./ESingest.py -d localhost:9200
+./esingest.py -d localhost:9200
 ```
 3. To run the command in verbose mode, use the -v parameter
 ```bash
-./ESingest.py -v -d localhost:9200 -r us-east-1
+./esingest.py -v -d localhost:9200 -r us-east-1
 ```
 
 ### Cleanup

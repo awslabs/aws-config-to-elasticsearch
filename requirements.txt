@@ -1,11 +1,6 @@
 boto3
-logging
-sys
-datetime
+botocore
+requests
 gzip
 json
-time
 argparse
-botocore
-datetime
-requests
