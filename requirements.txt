@@ -1,0 +1,11 @@
+boto3
+logging
+sys
+datetime
+gzip
+json
+time
+argparse
+botocore
+datetime
+requests
