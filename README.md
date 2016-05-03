@@ -1,39 +1,49 @@
 Import your AWS Config Snapshots into ElasticSearch
 ===================================================
 
-# What does this app do?
+### What does this app do?
 It will ingest all of your AWS Config Snapshots into ElasticSearch for further analysis with Kibana
 
-# Getting the code
+### Getting the code
 ```
-git clone --depth 1 <the url for this repo>
+git clone --depth 1 <repo_url>
 ```
 
-# Running the code
-Install the following two packages (those are the only ones I had to install while writing the code):
-```python
-pip install boto3
-pip install gzip
+### The code
+#### Prerequisites
+1. An ELK stack, up and running
+
+2. Install the required packages. The requirements.txt file is included with this repo.
 ```
-And here's the command:
+pip install -r ./requirements.txt
+```
+
+#### The command
 ```bash
 ./ESingest.py
-usage: ESingest.py [-h] [--region REGION] --destination DESTINATION
-                   [--verbose]
-ESingest.py: error: argument --destination/-d is required
+usage: ESingest.py [-h] [--region REGION] --destination DESTINATION [--verbose]
+
 ```
 
-Let's say that you have your ElasticSearch node running on localhost:9200 and you want to import only your us-east-1 snapshot, then you'd run the following command:
+1. Let's say that you have your ElasticSearch node running on localhost:9200 and you want to import only your us-east-1 snapshot, then you'd run the following command:
+```bash
+./ESingest.py -d localhost:9200 -r us-east-1
+```
+
+2. If you want to import Snapshots from all of your AWS Config-enabled regions, run the command without the '-r' parameter:
+```bash
+./ESingest.py -d localhost:9200
+```
+3. To run the command in verbose mode, use the -v parameter
 ```bash
 ./ESingest.py -v -d localhost:9200 -r us-east-1
 ```
 
-If you want to import Snapshots from all of your AWS Config-enabled regions, run the command without the '-r' parameter:
-```bash
-./ESingest.py -v -d localhost:9200
-```
-# Cleanup -- DON'T RUN THESE COMMANDS IF YOU DON'T WANT TO LOSE EVERYTHING IN YOUR ELASTICSEARCH NODE!!!!
-__THIS COMMAND WILL ERASE EVERYTHING FROM YOUR ES NODE --- BE CAREFUL BEFORE RUNNING__
+### Cleanup
+
+####DON'T RUN THESE COMMANDS IF YOU DON'T WANT TO LOSE EVERYTHING IN YOUR ELASTICSEARCH NODE!
+
+#####_THIS COMMAND WILL ERASE EVERYTHING FROM YOUR ES NODE --- BE CAREFUL BEFORE RUNNING_
 ```bash
 curl -XDELETE localhost:9200/_all
 ```
