@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import datetime
 import gzip
@@ -45,14 +45,14 @@ def get_configuration_snapshot_file(s3conn, bucket_name, file_partial_name):
 
 def load_data_into_es(filename, iso_now_time, es):
     data = None
-    with gzip.open(filename, 'rb') as dataFile:
+    with gzip.open(filename, 'r') as dataFile:
         try:
             data = json.load(dataFile)
         except Exception:
             pass
 
-    itemcount = 0
-    couldnotaddcount = 0
+    item_count = 0
+    couldnotadd_count = 0
 
     if data is not None:
         configuration_items = data.get("configurationItems", [])
@@ -71,22 +71,22 @@ def load_data_into_es(filename, iso_now_time, es):
                         doc_type=typename,
                         json_message=item)
                     if response is not None:
-                        itemcount = itemcount + 1
+                        item_count = item_count + 1
                     else:
-                        couldnotaddcount = couldnotaddcount + 1
+                        couldnotadd_count = couldnotadd_count + 1
                 except Exception:
                     app_log.error("Couldn't add item: " + str(
                         item) + " because " + str(sys.exc_info()))
 
-    return itemcount, couldnotaddcount
+    return item_count, couldnotadd_count
 
 
-def loop_through_regions(curRegion, iso_now_time, es):
-    app_log.info("Current region: " + curRegion)
+def loop_through_regions(cur_region, iso_now_time, es):
+    app_log.info("Current region: " + cur_region)
 
     s3conn = boto3.resource(
         's3',
-        region_name=curRegion,
+        region_name=cur_region,
         config=Config(signature_version='s3v4'))
 
     if args.verbose:
@@ -95,7 +95,7 @@ def loop_through_regions(curRegion, iso_now_time, es):
         configlog = None
 
     config_service = ConfigServiceUtil(
-        region=curRegion,
+        region=cur_region,
         verbose_log=configlog)
 
     bucket_name = config_service.get_bucket_name_from_config_delivery_channel()
@@ -144,14 +144,14 @@ def loop_through_regions(curRegion, iso_now_time, es):
         DOWNLOADED_SNAPSHOT_FILE_NAME)
 
     verbose_log.info("Loading the file into elasticsearch")
-    itemCount, couldNotAdd = load_data_into_es(
+    item_count, could_not_add = load_data_into_es(
         DOWNLOADED_SNAPSHOT_FILE_NAME, iso_now_time, es)
 
-    if itemCount > 0:
-        app_log.info("Added: " + str(itemCount) +
-                     " items into ElasticSearch from " + curRegion)
-    if couldNotAdd > 0:
-        app_log.warn("Couldn't add " + str(couldNotAdd) +
+    if item_count > 0:
+        app_log.info("Added: " + str(item_count) +
+                     " items into ElasticSearch from " + cur_region)
+    if could_not_add > 0:
+        app_log.warn("Couldn't add " + str(could_not_add) +
                      " to ElasticSearch. Maybe you have permission issues? ")
 
 
