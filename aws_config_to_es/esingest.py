@@ -11,8 +11,8 @@ from argparse import ArgumentParser
 import boto3
 from botocore.client import Config
 
-from . import elastic
-from .configservice_util import ConfigServiceUtil
+import elastic
+from configservice_util import ConfigServiceUtil
 
 DOWNLOADED_SNAPSHOT_FILE_NAME = "/tmp/configsnapshot" + \
                                 str(time.time()) + ".json.gz"
