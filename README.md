@@ -2,7 +2,10 @@ Import your AWS Config Snapshots into ElasticSearch
 ===================================================
 
 ### What does this app do?
-It will ingest all of your AWS Config Snapshots into ElasticSearch for further analysis with Kibana
+It will ingest your AWS Config Snapshots into ElasticSearch for further analysis with Kibana. Please
+refer to [this blog post](https://aws.amazon.com/blogs/developer/how-to-analyze-aws-config-snapshots-with-elasticsearch-and-kibana/)
+for a more in-depth explanation of this solution.
+
 
 ### Getting the code
 ```
