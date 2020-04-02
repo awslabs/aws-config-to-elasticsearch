@@ -3,6 +3,7 @@ Import your AWS Config Snapshots into ElasticSearch
 ### Author: Vladimir Budilov
 * [LinkedIn](https://www.linkedin.com/in/vbudilov/)
 * [Medium](https://medium.com/@budilov)
+* [Twitter](https://twitter.com/VladimirBudilov)
 
 ### What problem does this app solve?
 You have a lot of resources in your AWS account and want to search and visualize them. For example, you'd like to know your EC2 Avaiability Zone distribution or how many EC2 instances are uzing a particular Security Group
